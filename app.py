@@ -94,7 +94,8 @@ if tab_selection == "🗺️ 주소→좌표 변환":
                             
                             # 결과 미리보기
                             with st.expander("📍 변환 결과 미리보기"):
-                                st.dataframe(result_df[['주소', 'latitude', 'longitude', 'geocoding_success']].head(10))
+                                preview_cols = [address_column, 'latitude', 'longitude', 'geocoding_success']
+                                st.dataframe(result_df[preview_cols].head(10))
                             
                             # 결과 다운로드
                             output = BytesIO()
