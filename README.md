@@ -1,3 +1,4 @@
+[VWorld Geocoder API 2.0 + AI 기반 주소 타입 자동 판별 + 주소 최적화]
 AI가 주소를 확인하고 이 주소정보를 좌표로 변환하는 로컬 서비스 
 
 - Geocoder API 2.0 레퍼런스를 활용하여 주소를 좌표로 변환 (출처 : https://www.vworld.kr/dev/v4dv_geocoderguide2_s001.do)
