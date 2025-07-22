@@ -1,13 +1,13 @@
 import re
 import time
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from urllib.parse import quote_plus
 import pandas as pd
 import requests
 
 class VWorldGeocoder:
     """
-    VWorld Geocoder API 2.0 + AI 기반 주소 타입 자동 판별 + 주소 최적화
+    VWorld Geocoder API 2.0 + AI 기반 주소 타입 자동 판별 + 번지 추가 최적화
     """
     
     def __init__(self, api_key: str, daily_limit: int = 40_000, delay: float = 0.1):
@@ -28,54 +28,75 @@ class VWorldGeocoder:
         
         # 도로명주소 패턴
         self.road_patterns = [
-            r'.*[로대길]\s*\d+',                    # 테헤란로 123, 강남대로 456
-            r'.*[로대].*길\s*\d+',                  # 논현로28길 15, 부림로169번길 22
-            r'.*로\d+번길\s*\d+',                   # 판교로242번길 15
-            r'.*대로\d+길\s*\d+',                   # 강남대로94길 20
-            r'.*길\s*\d+(-\d+)?$',                  # 서초중앙로길 123-4
+            r'.*[로대길]\s*\d+',
+            r'.*[로대].*길\s*\d+',
+            r'.*로\d+번길\s*\d+',
+            r'.*대로\d+길\s*\d+',
+            r'.*길\s*\d+(-\d+)?$',
         ]
         
-        # 지번주소 패턴  
+        # 지번주소 패턴
         self.parcel_patterns = [
-            r'.*[동리가]\s*\d+(-\d+)?$',            # 역삼동 123-45, 청담리 678
-            r'.*[동리가]\s*\d+번지',                 # 신사동 123번지
-            r'.*[동리가]\s*산\d+(-\d+)?',            # 관양동 산123-4
-            r'.*[읍면]\s+.*[동리]\s*\d+',            # 기흥읍 상갈동 123
+            r'.*[동리가]\s*\d+(-\d+)?$',
+            r'.*[동리가]\s*\d+번지',
+            r'.*[동리가]\s*산\d+(-\d+)?',
+            r'.*[읍면]\s+.*[동리]\s*\d+',
         ]
         
-        # 도로명 키워드 (확실한 도로명 표시어)
+        # 도로명 키워드
         self.road_keywords = ['로', '대로', '길', '번길', '가길']
         
-        # 지번 키워드 (확실한 지번 표시어)  
+        # 지번 키워드
         self.parcel_keywords = ['동', '리', '가', '읍', '면', '번지', '산']
     
     def optimize_address(self, address: str) -> str:
         """
-        🛠️ VWorld API에 최적화된 주소 형식으로 변환
+        🛠️ 기본 주소 최적화
         """
         address = address.strip()
         
-        # 1단계: 기본 정리
+        # 기본 정리
         address = re.sub(r'\s+', ' ', address)
         
-        # 2단계: 불필요한 행정구역명 제거
+        # 불필요한 행정구역명 제거
         unnecessary_words = ['특별시', '광역시', '특별자치시', '특별자치도']
         for word in unnecessary_words:
             address = address.replace(word, '')
         
-        # 3단계: 홍성군 등 농촌 지역 최적화
-        if '홍성군' in address:
-            # "충청남도 홍성군 홍성읍 오관리 254" → "홍성군 홍성읍 오관리 254"
-            address = re.sub(r'^충청남도\s*', '', address)
-        
-        # 4단계: 시/도 단위 간소화 (선택적)
-        address = re.sub(r'^[^도]*도\s*[^시]*시\s*', '', address)
-        address = re.sub(r'^[^시]*시\s*', '', address)
-        
-        # 5단계: 번지 표기 정리
-        address = re.sub(r'(\d+)번지', r'\1', address)
-        
         return address.strip()
+    
+    def generate_address_variants(self, address: str, addr_type: str) -> List[str]:
+        """
+        🔄 간소화된 주소 변형 생성 (원본 + 번지 추가만)
+        """
+        variants = []
+        original = address.strip()
+        
+        # 1. 원본 주소
+        variants.append(original)
+        
+        # 2. 지번주소인 경우 번지 추가
+        if addr_type == 'PARCEL':
+            # 마지막 숫자 뒤에 '번지' 추가
+            # '충청남도 홍성군 홍성읍 오관리 254' → '충청남도 홍성군 홍성읍 오관리 254번지'
+            # '충청남도 홍성군 홍성읍 오관리 296-5' → '충청남도 홍성군 홍성읍 오관리 296-5번지'
+            
+            # 이미 '번지'가 있는지 확인
+            if not re.search(r'\d+(-\d+)?번지', original):
+                # 마지막 숫자 패턴 찾기
+                number_match = re.search(r'(\d+(-\d+)?)$', original)
+                if number_match:
+                    with_bunji = re.sub(r'(\d+(-\d+)?)$', r'\1번지', original)
+                    if with_bunji != original:
+                        variants.append(with_bunji)
+        
+        # 중복 제거
+        unique_variants = []
+        for variant in variants:
+            if variant and variant.strip() and variant not in unique_variants:
+                unique_variants.append(variant)
+        
+        return unique_variants
     
     def analyze_address_type(self, address: str) -> str:
         """🤖 AI 기반 주소 타입 자동 판별"""
@@ -108,23 +129,19 @@ class VWorldGeocoder:
             parcel_score += 2
         
         # 최종 판별
-        if parcel_score >= road_score:
-            return 'PARCEL'
-        else:
-            return 'ROAD'
+        return 'PARCEL' if parcel_score >= road_score else 'ROAD'
     
-    def _call_api(self, encoded_addr: str, addr_type: str) -> Optional[Tuple[float, float]]:
-        """
-        VWorld API 2.0 호출 (캐시 문제 해결됨)
-        """
+    def _call_api(self, address: str, addr_type: str, debug: bool = False) -> Optional[Tuple[float, float]]:
+        """VWorld API 2.0 호출 (수정된 버전)"""
         
         if self.request_count >= self.daily_limit:
             raise RuntimeError("일일 40,000건 API 한도 초과")
         
-        # 캐시 확인 (성공한 결과만)
-        cache_key = f"{encoded_addr}_{addr_type}"
+        # 캐시 확인
+        cache_key = f"{address}_{addr_type}"
         if cache_key in self._success_cache:
-            print(f"캐시 사용: {encoded_addr}")
+            if debug:
+                print(f"💾 캐시 사용: {address}")
             return self._success_cache[cache_key]
         
         params = {
@@ -132,7 +149,7 @@ class VWorldGeocoder:
             "request": "getCoord",
             "version": "2.0",
             "crs": "epsg:4326",
-            "address": encoded_addr,
+            "address": address,  # URL 인코딩 없이 직접 전달
             "format": "json",
             "type": addr_type.upper(),
             "refine": "true",
@@ -141,29 +158,37 @@ class VWorldGeocoder:
         }
         
         try:
-            print(f"API 호출: {encoded_addr} ({addr_type})")
+            if debug:
+                print(f"📡 API 호출: {address} ({addr_type})")
+            
             response = requests.get(self.base_url, params=params, timeout=10)
             self.request_count += 1
             
             if response.status_code != 200:
-                print(f"HTTP 에러: {response.status_code}")
+                if debug:
+                    print(f"❌ HTTP 에러: {response.status_code}")
                 return None
             
             data = response.json()
             
+            if debug:
+                print(f"📋 API 응답: {data}")
+            
             # 응답 상태 확인
-            if data.get("response", {}).get("status") == "OK":
+            status = data.get("response", {}).get("status", "UNKNOWN")
+            
+            if status == "OK":
                 # result와 point 존재 여부 확인
                 result_data = data.get("response", {}).get("result", {})
                 point = result_data.get("point", {})
                 
                 if "x" in point and "y" in point:
                     try:
-                        # 좌표 추출
                         longitude = float(point["x"])  # x = 경도
                         latitude = float(point["y"])   # y = 위도
                         
-                        print(f"✅ 성공: {encoded_addr} -> ({latitude:.6f}, {longitude:.6f})")
+                        if debug:
+                            print(f"✅ 성공: {address} -> ({latitude:.6f}, {longitude:.6f})")
                         
                         # 성공한 결과만 캐시에 저장
                         self._success_cache[cache_key] = (latitude, longitude)
@@ -171,73 +196,86 @@ class VWorldGeocoder:
                         return latitude, longitude
                     
                     except (ValueError, TypeError) as e:
-                        print(f"❌ 좌표 변환 실패: {point}, 에러: {e}")
+                        if debug:
+                            print(f"❌ 좌표 변환 실패: {point}, 에러: {e}")
                         return None
                 else:
-                    print(f"❌ 좌표 정보 없음: {point}")
+                    if debug:
+                        print(f"❌ 좌표 정보 없음")
                     return None
+            
+            elif status == "NOT_FOUND":
+                if debug:
+                    print(f"❌ 주소 찾을 수 없음")
+                return None
             else:
-                status = data.get("response", {}).get("status", "UNKNOWN")
-                print(f"❌ API 상태 에러: {status}")
+                if debug:
+                    print(f"❌ API 상태 에러: {status}")
                 return None
                 
         except requests.exceptions.RequestException as e:
-            print(f"❌ 네트워크 에러: {e}")
+            if debug:
+                print(f"❌ 네트워크 에러: {e}")
             return None
         except Exception as e:
-            print(f"❌ 기타 에러: {e}")
+            if debug:
+                print(f"❌ 기타 에러: {e}")
             return None
         
         return None
     
-    def geocode_address(self, address: str, optimize: bool = True) -> Tuple[Optional[float], Optional[float], str]:
-        """🎯 스마트 지오코딩"""
+    def geocode_address(self, address: str, optimize: bool = True, debug: bool = False) -> Tuple[Optional[float], Optional[float], str]:
+        """🎯 스마트 지오코딩 - 번지 추가 + URL 인코딩 수정"""
         
         original_address = address.strip()
         if not original_address:
             return None, None, "UNKNOWN"
         
-        print(f"\n🔍 지오코딩 시작: {original_address}")
+        if debug:
+            print(f"\n🔍 지오코딩 시작: {original_address}")
         
-        # 시도할 주소 변형들
-        address_variants = [original_address]
-        
-        if optimize:
-            optimized_addr = self.optimize_address(original_address)
-            if optimized_addr != original_address:
-                print(f"🛠️ 최적화: {original_address} -> {optimized_addr}")
-                address_variants.insert(0, optimized_addr)  # 최적화된 주소를 먼저 시도
-        
-        # 각 주소 변형에 대해 시도
-        for variant_idx, addr_variant in enumerate(address_variants):
-            print(f"📍 시도 {variant_idx + 1}: {addr_variant}")
-            encoded_addr = quote_plus(addr_variant)
-            
-            # AI가 판별한 타입으로 먼저 시도
-            predicted_type = self.analyze_address_type(addr_variant)
+        # AI로 주소 타입 먼저 판별
+        predicted_type = self.analyze_address_type(original_address)
+        if debug:
             print(f"🤖 AI 예측: {predicted_type}")
+        
+        # 주소 변형 생성 (원본 + 번지 추가)
+        address_variants = self.generate_address_variants(original_address, predicted_type)
+        if debug:
+            print(f"🔄 생성된 변형: {len(address_variants)}개")
+            for i, variant in enumerate(address_variants):
+                print(f"  {i+1}. {variant}")
+        
+        for variant_idx, addr_variant in enumerate(address_variants):
+            if debug:
+                print(f"\n📍 변형 {variant_idx + 1}/{len(address_variants)}: {addr_variant}")
             
-            result = self._call_api(encoded_addr, predicted_type)
+            # 예측된 타입으로 먼저 시도
+            result = self._call_api(addr_variant, predicted_type, debug=debug)
             
             if result:
-                print(f"✅ 첫 시도 성공: {predicted_type}")
+                if debug:
+                    print(f"🎉 성공! 변형 {variant_idx + 1}에서 {predicted_type}으로 성공")
                 return result[0], result[1], predicted_type
             
             time.sleep(self.delay)
             
             # 반대 타입으로 재시도
             fallback_type = "PARCEL" if predicted_type == "ROAD" else "ROAD"
-            print(f"🔄 재시도: {fallback_type}")
+            if debug:
+                print(f"🔄 재시도: {fallback_type}")
             
-            result = self._call_api(encoded_addr, fallback_type)
+            result = self._call_api(addr_variant, fallback_type, debug=debug)
             
             if result:
-                print(f"✅ 재시도 성공: {fallback_type}")
+                if debug:
+                    print(f"🎉 성공! 변형 {variant_idx + 1}에서 {fallback_type}으로 성공")
                 return result[0], result[1], fallback_type
             
             time.sleep(self.delay)
         
-        print(f"❌ 모든 시도 실패: {original_address}")
+        if debug:
+            print(f"💥 모든 변형 실패: {original_address}")
         return None, None, "FAILED"
     
     def process_dataframe(self, df: pd.DataFrame, address_column: str, progress_callback=None, optimize_address=True) -> pd.DataFrame:
@@ -250,7 +288,7 @@ class VWorldGeocoder:
         longitudes = []
         used_types = []
         predicted_types = []
-        optimized_addresses = [] if optimize_address else None
+        successful_variants = []
         
         total_rows = len(df)
         
@@ -260,31 +298,32 @@ class VWorldGeocoder:
             if pd.isna(addr):
                 lat, lon, used_type = None, None, "UNKNOWN"
                 predicted_type = "UNKNOWN"
-                optimized_addr = None
+                successful_variant = "빈 주소"
             else:
                 original_addr = str(addr)
+                predicted_type = self.analyze_address_type(original_addr)
                 
-                # 주소 최적화
-                if optimize_address:
-                    optimized_addr = self.optimize_address(original_addr)
-                    analysis_addr = optimized_addr
-                else:
-                    optimized_addr = original_addr
-                    analysis_addr = original_addr
-                
-                # AI 예측 저장
-                predicted_type = self.analyze_address_type(analysis_addr)
+                # 첫 번째와 마지막 주소는 디버그 모드로 실행
+                debug_mode = (idx == 0 or idx == total_rows - 1)
                 
                 # 실제 지오코딩 수행
-                lat, lon, used_type = self.geocode_address(original_addr, optimize=optimize_address)
+                lat, lon, used_type = self.geocode_address(
+                    original_addr,
+                    optimize=optimize_address,
+                    debug=debug_mode
+                )
+                
+                # 성공한 경우 기록
+                if lat is not None:
+                    successful_variant = f"성공 ({used_type})"
+                else:
+                    successful_variant = "실패"
             
             latitudes.append(lat)
             longitudes.append(lon)
             used_types.append(used_type)
             predicted_types.append(predicted_type)
-            
-            if optimize_address:
-                optimized_addresses.append(optimized_addr)
+            successful_variants.append(successful_variant)
             
             # 진행률 콜백 호출
             if progress_callback:
@@ -293,7 +332,13 @@ class VWorldGeocoder:
             # 콘솔 진행률 표시
             success_count = sum(1 for lat in latitudes if lat is not None)
             success_rate = (success_count / (idx + 1)) * 100
-            print(f"📊 진행률: {idx + 1}/{total_rows} ({(idx + 1)/total_rows*100:.1f}%) - 성공률: {success_rate:.1f}% ({success_count}건 성공)")
+            
+            if idx == 0 or (idx + 1) % 3 == 0 or (idx + 1) == total_rows:
+                print(f"\n📊 진행률: {idx + 1}/{total_rows} ({(idx + 1)/total_rows*100:.1f}%) - 성공률: {success_rate:.1f}% ({success_count}건 성공)")
+            
+            # API 과부하 방지
+            if idx < total_rows - 1:
+                time.sleep(0.2)
         
         print(f"\n🎉 지오코딩 완료!")
         print(f"📊 최종 결과: {sum(1 for lat in latitudes if lat is not None)}/{total_rows}건 성공")
@@ -305,8 +350,12 @@ class VWorldGeocoder:
         result_df["geocoding_success"] = [lat is not None for lat in latitudes]
         result_df["ai_predicted_type"] = predicted_types
         result_df["actual_used_type"] = used_types
+        result_df["result_status"] = successful_variants
         
+        # 최적화된 주소 컬럼도 추가 (app.py 호환성)
         if optimize_address:
+            optimized_addresses = [self.optimize_address(str(addr)) if pd.notna(addr) else None 
+                                 for addr in df[address_column]]
             result_df["optimized_address"] = optimized_addresses
         
         return result_df
