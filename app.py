@@ -9,7 +9,22 @@ from geocoding_logic import VWorldGeocoder
 load_dotenv()
 
 st.set_page_config(page_title="🤖 AI 주소 → 좌표 변환기", page_icon="🗺️")
-st.title("🗺️ AI스마트 지오코딩(주소 → 좌표 변환기)")
+
+# CSS 스타일 추가 - 제목 크기를 절반으로
+st.markdown("""
+<style>
+.small-title {
+    font-size: 1.8rem !important;
+    font-weight: bold;
+    color: #1f77b4;
+    margin-bottom: 1rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# 제목을 HTML로 표시 (기존 st.title() 대신)
+st.markdown('<h1 class="small-title">🗺️ AI지오코딩(주소→좌표 변환기)</h1>', 
+            unsafe_allow_html=True)
 
 # 앱 설명 추가
 st.markdown("""
@@ -85,8 +100,7 @@ if st.checkbox("🤖 AI 주소 분석 미리보기 (선택사항)"):
         preview_data = []
         for addr in sample_addresses:
             original_addr = str(addr)
-            optimized_addr = geocoder_preview.optimize_address(original_addr) if optimize_address else original_addr
-            predicted_type = geocoder_preview.analyze_address_type(optimized_addr)
+            optimized_addr = geocoder_preview.universal_address_optimize(original_addr)[0] if optimize_address else original_addr
             
             preview_data.append({
                 "원본 주소": original_addr,
@@ -239,9 +253,9 @@ if st.button("🤖 스마트 지오코딩 시작"):
             **🔍 가능한 해결방법:**
             1. **API 키 확인**: VWorld 홈페이지에서 API 키가 유효한지 확인
             2. **주소 최적화 사용**: 위의 '주소 형식 자동 최적화' 체크박스 활성화
-            3. **주소 형식 수정**: 더 간단한 형태로 변경 (예: '홍성군 홍성읍 오관리 254')
+            3. **주소 형식 수정**: 더 간단한 형태로 변경 (예: 'OO군 OO읍 OO리 123')
             4. **네트워크 확인**: 인터넷 연결 상태 확인
-            5. **API 한도 확인**: 일일 40,000건 한도 초과 여부 확인
+            5. **API 한도 확인**: VWorld 일일 40,000건 한도 초과 여부 확인
             """)
     
     # 결과 미리보기
@@ -318,23 +332,7 @@ if st.button("🤖 스마트 지오코딩 시작"):
             
             if common_words:
                 st.write(f"- **공통 키워드**: {', '.join(common_words)}")
-            
-            # 홍성군 주소에 특화된 안내
-            if "홍성군" in all_failed_text:
-                st.warning("""
-                🏘️ **홍성군 주소 특이사항:**
-                현재 실패한 주소들이 모두 충청남도 홍성군 지역입니다. 
-                이 지역의 일부 주소는 VWorld에서 인식하지 못할 수 있습니다.
-                """)
-            
-            st.info("""
-            💡 **지번주소 실패 원인 및 해결방법:**
-            - **상세 주소 부족**: 번지까지 정확히 입력되었는지 확인
-            - **행정구역 변경**: 과거 주소이거나 행정구역이 변경된 경우
-            - **VWorld DB 미반영**: 신규 지역이나 일부 농촌 지역
-            - **주소 최적화 사용**: 위의 '주소 형식 자동 최적화' 기능 활용
-            """)
-    
+                
     # 6) 다운로드
     st.subheader("📥 결과 다운로드")
     
@@ -442,20 +440,3 @@ with st.sidebar:
             **현재 요청:** 0건
             **AI 절약 효과:** 최대 50% 호출 감소
             """)
-    
-    with st.expander("홍성군 주소 특이사항"):
-        st.write("""
-        **🏘️ 홍성군 지역 특이사항:**
-        
-        일부 홍성군 지역 주소는 다음 이유로 
-        변환에 실패할 수 있습니다:
-        
-        - 농촌 지역의 일부 번지 미등록
-        - 과거 행정구역 변경 이력
-        - VWorld DB 업데이트 지연
-        
-        **해결방법:**
-        1. 주소 최적화 기능 사용
-        2. 도로명주소로 변환 후 시도
-        3. 인근 주요 도로명 활용
-        """)
